@@ -1,17 +1,26 @@
 # Set the device with environment, default is cuda:0
 # export SENSEVOICE_DEVICE=cuda:1
-
+import io
+import base64
 import os, re
-from fastapi import FastAPI, File, Form
-from fastapi.responses import HTMLResponse
+import torch
+import torchaudio
+import uvicorn
+import argparse
+from fastapi import FastAPI, File, Form, Request, status
+from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.openapi.docs import get_swagger_ui_html
+from starlette.middleware.cors import CORSMiddleware  #引入 CORS中间件模块
 from typing_extensions import Annotated
 from typing import List
 from enum import Enum
-import torchaudio
 from model import SenseVoiceSmall
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 from io import BytesIO
-
+from contextlib import asynccontextmanager
+from custom.file_utils import logging
+from custom.TextProcessor import TextProcessor
 
 class Language(str, Enum):
     auto = "auto"
@@ -28,8 +37,61 @@ m.eval()
 
 regex = r"<\|.*\|>"
 
-app = FastAPI()
+# 定义一个函数进行显存清理
+def clear_cuda_cache():
+    torch.cuda.empty_cache()
+    logging.info("CUDA cache cleared!")
 
+#设置允许访问的域名
+origins = ["*"]  #"*"，即为所有。
+
+# 定义 FastAPI 应用
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 在应用启动时加载模型
+    logging.info("Application loaded successfully!")
+    yield  # 这里是应用运行的时间段
+    logging.info("Application shutting down...")  # 在这里可以释放资源   
+    clear_cuda_cache()
+
+app = FastAPI(docs_url=None, lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  #设置允许的origins来源
+    allow_credentials=True,
+    allow_methods=["*"],  # 设置允许跨域的http方法，比如 get、post、put等。
+    allow_headers=["*"])  #允许跨域的headers，可以用来鉴别来源等作用。
+# 挂载静态文件
+app.mount("/static", StaticFiles(directory="static"), name="static")
+# 使用本地的 Swagger UI 静态资源
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    logging.info("Custom Swagger UI endpoint hit")
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="Custom Swagger UI",
+        swagger_js_url="/static/swagger-ui/5.9.0/swagger-ui-bundle.js",
+        swagger_css_url="/static/swagger-ui/5.9.0/swagger-ui.css",
+    )
+
+@app.middleware("http")
+async def clear_gpu_after_request(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        clear_cuda_cache()
+# 自定义异常处理器
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logging.info(f"Exception during request {request.url}: {exc}")
+
+    clear_cuda_cache()
+
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"message": "Internal Server Error"}
+    )
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -45,12 +107,50 @@ async def root():
         </body>
     </html>
     """
+@app.get("/test")
+async  def test():
+    return PlainTextResponse('success')
+
+@app.get("/api/v1/asr")
+async def turn_audio_path_to_text(audio_path:str,keys:str="",lang:str="auto"):
+    audios = []
+    audio_fs = 0
+    with open(audio_path, 'rb') as file:
+        binary_data = file.read()
+    file_io = BytesIO(binary_data)
+    data_or_path_or_list, audio_fs = torchaudio.load(file_io)
+    data_or_path_or_list = data_or_path_or_list.mean(0)
+    audios.append(data_or_path_or_list)
+    file_io.close()
+    if lang == "":
+        lang = "auto"
+    if keys == "":
+        key = ["wav_file_tmp_name"]
+    else:
+        key = keys.split(",")
+    res = m.inference(
+        data_in=audios,
+        language=lang,  # "zh", "en", "yue", "ja", "ko", "nospeech"
+        use_itn=True,
+        ban_emo_unk=False,
+        key=key,
+        fs=audio_fs,
+        **kwargs,
+    )
+    if len(res) == 0:
+        return {"result": []}
+    for it in res[0]:
+        it["raw_text"] = it["text"]
+        it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
+        it["text"] = rich_transcription_postprocess(it["text"])
+    return {"result": res[0]}
 
 @app.post("/api/v1/asr")
-async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav or mp3 audios in 16KHz")], keys: Annotated[str, Form(description="name of each audio joined with comma")], lang: Annotated[Language, Form(description="language of audio content")] = "auto"):
+async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav or mp3 audios in 16KHz")], keys: Annotated[str, Form(description="name of each audio joined with comma")]="", lang: Annotated[Language, Form(description="language of audio content")] = "auto"):
     audios = []
     audio_fs = 0
     for file in files:
+        logging.info(file)
         file_io = BytesIO(file)
         data_or_path_or_list, audio_fs = torchaudio.load(file_io)
         data_or_path_or_list = data_or_path_or_list.mean(0)
@@ -65,7 +165,7 @@ async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav
     res = m.inference(
         data_in=audios,
         language=lang, # "zh", "en", "yue", "ja", "ko", "nospeech"
-        use_itn=False,
+        use_itn=True,
         ban_emo_unk=False,
         key=key,
         fs=audio_fs,
@@ -78,3 +178,14 @@ async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav
         it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
         it["text"] = rich_transcription_postprocess(it["text"])
     return {"result": res[0]}
+
+try:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=7868)
+    args = parser.parse_args()
+    uvicorn.run(app=app, host="0.0.0.0", port=args.port, workers=1)
+except Exception as e:
+    clear_cuda_cache()
+    TextProcessor.log_error(e)
+    logging.info(e)
+    exit(0)
