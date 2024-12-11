@@ -87,6 +87,8 @@ async def global_exception_handler(request: Request, exc: Exception):
     logging.info(f"Exception during request {request.url}: {exc}")
 
     clear_cuda_cache()
+    # 记录错误信息
+    TextProcessor.log_error(exc)
 
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -113,6 +115,8 @@ async  def test():
 
 @app.get("/api/v1/asr")
 async def turn_audio_path_to_text(audio_path:str,keys:str="",lang:str="auto"):
+    logging.info("turn_audio_path_to_text_start")
+
     audios = []
     audio_fs = 0
     with open(audio_path, 'rb') as file:
@@ -147,10 +151,11 @@ async def turn_audio_path_to_text(audio_path:str,keys:str="",lang:str="auto"):
 
 @app.post("/api/v1/asr")
 async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav or mp3 audios in 16KHz")], keys: Annotated[str, Form(description="name of each audio joined with comma")]="", lang: Annotated[Language, Form(description="language of audio content")] = "auto"):
+    logging.info("turn_audio_to_text_start")
+
     audios = []
     audio_fs = 0
     for file in files:
-        logging.info(file)
         file_io = BytesIO(file)
         data_or_path_or_list, audio_fs = torchaudio.load(file_io)
         data_or_path_or_list = data_or_path_or_list.mean(0)
@@ -179,13 +184,16 @@ async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav
         it["text"] = rich_transcription_postprocess(it["text"])
     return {"result": res[0]}
 
-try:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=7868)
-    args = parser.parse_args()
-    uvicorn.run(app=app, host="0.0.0.0", port=args.port, workers=1)
-except Exception as e:
-    clear_cuda_cache()
-    TextProcessor.log_error(e)
-    logging.info(e)
-    exit(0)
+if __name__ == '__main__':
+    # 设置显存比例限制为 50%
+    torch.cuda.set_per_process_memory_fraction(0.5, 0)
+
+    try:
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--port", type=int, default=7868)
+        args = parser.parse_args()
+        uvicorn.run(app=app, host="0.0.0.0", port=args.port, workers=1)
+    except Exception as e:
+        clear_cuda_cache()
+        logging.error(e)
+        exit(0)
