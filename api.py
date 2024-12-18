@@ -7,6 +7,8 @@ import torch
 import torchaudio
 import uvicorn
 import argparse
+import gc
+import asyncio
 from fastapi import FastAPI, File, Form, Request, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -41,34 +43,27 @@ regex = r"<\|.*\|>"
 def clear_cuda_cache():
     """
     清理PyTorch的显存和系统内存缓存。
+    注意上下文，如果在异步执行，会导致清理不了
     """
+    logging.info("Clearing GPU memory...")
+    # 强制进行垃圾回收
+    gc.collect()
+
     if torch.cuda.is_available():
-        logging.info("Clearing GPU memory...")
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
-
+        # 重置统计信息
+        torch.cuda.reset_peak_memory_stats()
         # 打印显存日志
         logging.info(f"[GPU Memory] Allocated: {torch.cuda.memory_allocated() / (1024 ** 2):.2f} MB")
         logging.info(f"[GPU Memory] Max Allocated: {torch.cuda.max_memory_allocated() / (1024 ** 2):.2f} MB")
         logging.info(f"[GPU Memory] Reserved: {torch.cuda.memory_reserved() / (1024 ** 2):.2f} MB")
         logging.info(f"[GPU Memory] Max Reserved: {torch.cuda.max_memory_reserved() / (1024 ** 2):.2f} MB")
 
-        # 重置统计信息
-        torch.cuda.reset_peak_memory_stats()
-
 #设置允许访问的域名
 origins = ["*"]  #"*"，即为所有。
 
-# 定义 FastAPI 应用
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # 在应用启动时加载模型
-    logging.info("Application loaded successfully!")
-    yield  # 这里是应用运行的时间段
-    logging.info("Application shutting down...")  # 在这里可以释放资源   
-    clear_cuda_cache()
-
-app = FastAPI(docs_url=None, lifespan=lifespan)
+app = FastAPI(docs_url=None)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,  #设置允许的origins来源
@@ -86,27 +81,6 @@ async def custom_swagger_ui_html():
         title="Custom Swagger UI",
         swagger_js_url="/static/swagger-ui/5.9.0/swagger-ui-bundle.js",
         swagger_css_url="/static/swagger-ui/5.9.0/swagger-ui.css",
-    )
-
-@app.middleware("http")
-async def clear_gpu_after_request(request: Request, call_next):
-    try:
-        response = await call_next(request)
-        return response
-    finally:
-        clear_cuda_cache()
-# 自定义异常处理器
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logging.info(f"Exception during request {request.url}: {exc}")
-
-    clear_cuda_cache()
-    # 记录错误信息
-    TextProcessor.log_error(exc)
-
-    return JSONResponse(
-        {"errcode": 500, "errmsg": "Internal Server Error"},
-        status_code=500
     )
 
 @app.get("/", response_class=HTMLResponse)
@@ -130,73 +104,90 @@ async  def test():
 @app.get("/api/v1/asr")
 async def turn_audio_path_to_text(audio_path:str,keys:str="",lang:str="auto"):
     logging.info("turn_audio_path_to_text_start")
+    try:
+        audios = []
+        audio_fs = 0
+        with open(audio_path, 'rb') as file:
+            binary_data = file.read()
+        file_io = BytesIO(binary_data)
+        data_or_path_or_list, audio_fs = torchaudio.load(file_io)
+        data_or_path_or_list = data_or_path_or_list.mean(0)
+        audios.append(data_or_path_or_list)
+        file_io.close()
+        if lang == "":
+            lang = "auto"
+        if keys == "":
+            key = ["wav_file_tmp_name"]
+        else:
+            key = keys.split(",")
+        res = m.inference(
+            data_in=audios,
+            language=lang,  # "zh", "en", "yue", "ja", "ko", "nospeech"
+            use_itn=True,
+            ban_emo_unk=False,
+            key=key,
+            fs=audio_fs,
+            **kwargs,
+        )
+        if len(res) == 0:
+            return {"result": []}
+        for it in res[0]:
+            it["raw_text"] = it["text"]
+            it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
+            it["text"] = rich_transcription_postprocess(it["text"])
+        return {"result": res[0]}
+    except Exception as e:
+        # 记录错误信息
+        TextProcessor.log_error(e)
+        logging.error(e)
+    finally:
+        clear_cuda_cache()
 
-    audios = []
-    audio_fs = 0
-    with open(audio_path, 'rb') as file:
-        binary_data = file.read()
-    file_io = BytesIO(binary_data)
-    data_or_path_or_list, audio_fs = torchaudio.load(file_io)
-    data_or_path_or_list = data_or_path_or_list.mean(0)
-    audios.append(data_or_path_or_list)
-    file_io.close()
-    if lang == "":
-        lang = "auto"
-    if keys == "":
-        key = ["wav_file_tmp_name"]
-    else:
-        key = keys.split(",")
-    res = m.inference(
-        data_in=audios,
-        language=lang,  # "zh", "en", "yue", "ja", "ko", "nospeech"
-        use_itn=True,
-        ban_emo_unk=False,
-        key=key,
-        fs=audio_fs,
-        **kwargs,
-    )
-    if len(res) == 0:
-        return {"result": []}
-    for it in res[0]:
-        it["raw_text"] = it["text"]
-        it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
-        it["text"] = rich_transcription_postprocess(it["text"])
-    return {"result": res[0]}
+    return {"result": "error"}
 
 @app.post("/api/v1/asr")
 async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav or mp3 audios in 16KHz")], keys: Annotated[str, Form(description="name of each audio joined with comma")]="", lang: Annotated[Language, Form(description="language of audio content")] = "auto"):
     logging.info("turn_audio_to_text_start")
 
-    audios = []
-    audio_fs = 0
-    for file in files:
-        file_io = BytesIO(file)
-        data_or_path_or_list, audio_fs = torchaudio.load(file_io)
-        data_or_path_or_list = data_or_path_or_list.mean(0)
-        audios.append(data_or_path_or_list)
-        file_io.close()
-    if lang == "":
-        lang = "auto"
-    if keys == "":
-        key = ["wav_file_tmp_name"]
-    else:
-        key = keys.split(",")
-    res = m.inference(
-        data_in=audios,
-        language=lang, # "zh", "en", "yue", "ja", "ko", "nospeech"
-        use_itn=True,
-        ban_emo_unk=False,
-        key=key,
-        fs=audio_fs,
-        **kwargs,
-    )
-    if len(res) == 0:
-        return {"result": []}
-    for it in res[0]:
-        it["raw_text"] = it["text"]
-        it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
-        it["text"] = rich_transcription_postprocess(it["text"])
-    return {"result": res[0]}
+    try:
+        audios = []
+        audio_fs = 0
+        for file in files:
+            file_io = BytesIO(file)
+            data_or_path_or_list, audio_fs = torchaudio.load(file_io)
+            data_or_path_or_list = data_or_path_or_list.mean(0)
+            audios.append(data_or_path_or_list)
+            file_io.close()
+        if lang == "":
+            lang = "auto"
+        if keys == "":
+            key = ["wav_file_tmp_name"]
+        else:
+            key = keys.split(",")
+        res = m.inference(
+            data_in=audios,
+            language=lang, # "zh", "en", "yue", "ja", "ko", "nospeech"
+            use_itn=True,
+            ban_emo_unk=False,
+            key=key,
+            fs=audio_fs,
+            **kwargs,
+        )
+        if len(res) == 0:
+            return {"result": []}
+        for it in res[0]:
+            it["raw_text"] = it["text"]
+            it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
+            it["text"] = rich_transcription_postprocess(it["text"])
+        return {"result": res[0]}
+    except Exception as e:
+        # 记录错误信息
+        TextProcessor.log_error(e)
+        logging.error(e)
+    finally:
+        clear_cuda_cache()
+
+    return {"result": "error"}
 
 if __name__ == '__main__':
     # 设置显存比例限制为 50%
