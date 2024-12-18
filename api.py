@@ -136,10 +136,10 @@ async def turn_audio_path_to_text(audio_path:str,keys:str="",lang:str="auto"):
             it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
             it["text"] = rich_transcription_postprocess(it["text"])
         return {"result": res[0]}
-    except Exception as e:
+    except Exception as ex:
         # 记录错误信息
-        TextProcessor.log_error(e)
-        logging.error(e)
+        TextProcessor.log_error(ex)
+        logging.error(ex)
     finally:
         clear_cuda_cache()
 
@@ -180,10 +180,10 @@ async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav
             it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
             it["text"] = rich_transcription_postprocess(it["text"])
         return {"result": res[0]}
-    except Exception as e:
+    except Exception as ex:
         # 记录错误信息
-        TextProcessor.log_error(e)
-        logging.error(e)
+        TextProcessor.log_error(ex)
+        logging.error(ex)
     finally:
         clear_cuda_cache()
 
