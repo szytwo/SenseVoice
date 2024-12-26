@@ -26,8 +26,12 @@ emotion2vec*
 GPT-SoVITS*
 modelscope_models
 examples/aishell/llm_asr_nar/*
+*.whl
 
 results/
 error/
 venv/
 example/
+
+go-api.bat
+go-api-conda.bat
