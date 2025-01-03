@@ -103,11 +103,15 @@ async  def test():
     return PlainTextResponse('success')
 
 @app.get("/api/v1/asr")
-async def turn_audio_path_to_text(audio_path:str,keys:str="",lang:str="auto"):
+async def turn_audio_path_to_text(
+        audio_path:str,
+        keys:str = "",
+        lang:str = "auto",
+        output_timestamp:bool = False
+    ):
     logging.info("turn_audio_path_to_text_start")
     try:
         audios = []
-        audio_fs = 0
         with open(audio_path, 'rb') as file:
             binary_data = file.read()
         file_io = BytesIO(binary_data)
@@ -122,14 +126,14 @@ async def turn_audio_path_to_text(audio_path:str,keys:str="",lang:str="auto"):
         else:
             key = keys.split(",")
         res = m.inference(
-            data_in=audios,
-            language=lang,  # "zh", "en", "yue", "ja", "ko", "nospeech"
-            use_itn=True,
-            ban_emo_unk=False,
-            key=key,
-            fs=audio_fs,
-            output_timestamp=True,
-            **kwargs,
+            data_in = audios,
+            language = lang,  # "zh", "en", "yue", "ja", "ko", "nospeech"
+            use_itn = True,
+            ban_emo_unk = False,
+            key = key,
+            fs = audio_fs,
+            output_timestamp = output_timestamp,
+            **kwargs
         )
         if len(res) == 0:
             return {"result": []}
@@ -148,7 +152,12 @@ async def turn_audio_path_to_text(audio_path:str,keys:str="",lang:str="auto"):
     return {"result": "error"}
 
 @app.post("/api/v1/asr")
-async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav or mp3 audios in 16KHz")], keys: Annotated[str, Form(description="name of each audio joined with comma")]="", lang: Annotated[Language, Form(description="language of audio content")] = "auto"):
+async def turn_audio_to_text(
+        files: Annotated[List[bytes], File(description="wav or mp3 audios in 16KHz")],
+        keys: Annotated[str, Form(description="name of each audio joined with comma")] = "",
+        lang: Annotated[Language, Form(description="language of audio content")] = "auto",
+        output_timestamp: Annotated[bool, Form(description="output timestamp")] = False
+    ):
     logging.info("turn_audio_to_text_start")
 
     try:
@@ -167,14 +176,14 @@ async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav
         else:
             key = keys.split(",")
         res = m.inference(
-            data_in=audios,
-            language=lang, # "zh", "en", "yue", "ja", "ko", "nospeech"
-            use_itn=True,
-            ban_emo_unk=False,
-            key=key,
-            fs=audio_fs,
-            output_timestamp=True,
-            **kwargs,
+            data_in = audios,
+            language = lang, # "zh", "en", "yue", "ja", "ko", "nospeech"
+            use_itn = True,
+            ban_emo_unk = False,
+            key = key,
+            fs= audio_fs,
+            output_timestamp = output_timestamp,
+            **kwargs
         )
         if len(res) == 0:
             return {"result": []}
