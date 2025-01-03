@@ -33,8 +33,9 @@ class Language(str, Enum):
     ko = "ko"
     nospeech = "nospeech"
 
+SENSEVOICE_DEVICE = os.getenv("SENSEVOICE_DEVICE", "cuda:0")
 model_dir = "iic/SenseVoiceSmall"
-m, kwargs = SenseVoiceSmall.from_pretrained(model=model_dir, device=os.getenv("SENSEVOICE_DEVICE", "cuda:0"))
+m, kwargs = SenseVoiceSmall.from_pretrained(model=model_dir, device=SENSEVOICE_DEVICE)
 m.eval()
 
 regex = r"<\|.*\|>"
@@ -190,13 +191,17 @@ async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav
     return {"result": "error"}
 
 if __name__ == '__main__':
-    # 设置显存比例限制为 50%
-    torch.cuda.set_per_process_memory_fraction(0.5, 0)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=7868)
+    # 设置显存比例限制（浮点类型，默认值为 0）
+    parser.add_argument("--cuda_memory", type=float, default=0)
+    args = parser.parse_args()
+    # 设置显存比例限制
+    if args.cuda_memory > 0:
+        logging.info(f"cuda_memory: {args.cuda_memory}")
+        torch.cuda.set_per_process_memory_fraction(args.cuda_memory, SENSEVOICE_DEVICE.split(':')[1])
 
     try:
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--port", type=int, default=7868)
-        args = parser.parse_args()
         uvicorn.run(app=app, host="0.0.0.0", port=args.port, workers=1)
     except Exception as e:
         clear_cuda_cache()
