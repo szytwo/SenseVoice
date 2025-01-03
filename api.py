@@ -128,6 +128,7 @@ async def turn_audio_path_to_text(audio_path:str,keys:str="",lang:str="auto"):
             ban_emo_unk=False,
             key=key,
             fs=audio_fs,
+            output_timestamp=True,
             **kwargs,
         )
         if len(res) == 0:
@@ -172,6 +173,7 @@ async def turn_audio_to_text(files: Annotated[List[bytes], File(description="wav
             ban_emo_unk=False,
             key=key,
             fs=audio_fs,
+            output_timestamp=True,
             **kwargs,
         )
         if len(res) == 0:
