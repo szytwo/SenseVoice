@@ -198,8 +198,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     # 设置显存比例限制
     if args.cuda_memory > 0:
-        logging.info(f"cuda_memory: {args.cuda_memory}")
-        torch.cuda.set_per_process_memory_fraction(args.cuda_memory, SENSEVOICE_DEVICE.split(':')[1])
+        device_index = int(SENSEVOICE_DEVICE.split(':')[1])
+        logging.info(f"device_index: {device_index} cuda_memory: {args.cuda_memory}")
+        torch.cuda.set_per_process_memory_fraction(args.cuda_memory, device_index)
 
     try:
         uvicorn.run(app=app, host="0.0.0.0", port=args.port, workers=1)
