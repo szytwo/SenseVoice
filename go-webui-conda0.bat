@@ -15,11 +15,11 @@ IF ERRORLEVEL 1 (
 )
 
 REM 设置 GPU 环境变量，选择显卡
-set CUDA_VISIBLE_DEVICES=1
-SET SENSEVOICE_DEVICE=cuda:1
+set CUDA_VISIBLE_DEVICES=0
+SET SENSEVOICE_DEVICE=cuda:0
 
 REM 执行 Python 脚本
-python api.py --port 7868 --cuda_memory 0
+python webui.py
 
 REM 保持窗口打开
 pause

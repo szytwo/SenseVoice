@@ -19,7 +19,7 @@ set CUDA_VISIBLE_DEVICES=0
 SET SENSEVOICE_DEVICE=cuda:0
 
 REM 执行 Python 脚本
-python api.py
+python api.py --port 7868 --cuda_memory 0
 
 REM 保持窗口打开
 pause
