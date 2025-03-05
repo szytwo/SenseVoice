@@ -149,7 +149,7 @@ async def turn_audio_path_to_text(
     finally:
         clear_cuda_cache()
 
-    return {"result": "error"}
+    return {"result": []}
 
 @app.post("/api/v1/asr")
 async def turn_audio_to_text(
@@ -199,7 +199,7 @@ async def turn_audio_to_text(
     finally:
         clear_cuda_cache()
 
-    return {"result": "error"}
+    return {"result": []}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
