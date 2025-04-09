@@ -37,6 +37,7 @@ examples/aishell/llm_asr_nar/*
 /venv/
 /example/test/
 /models/
+/wheels/
 
 go-api.bat
 go-api-conda.bat
