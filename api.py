@@ -21,8 +21,10 @@ from starlette.middleware.cors import CORSMiddleware  # 引入 CORS中间件模�
 from typing_extensions import Annotated
 
 from custom.TextProcessor import TextProcessor
-from custom.file_utils import logging
+from custom.file_utils import logging, is_running_in_docker, get_file_name, delete_old_files_and_folders
 from model import SenseVoiceSmall
+
+result_input_dir = './results/input'
 
 
 class Language(str, Enum):
@@ -126,6 +128,12 @@ async def turn_audio_path_to_text(
     start_time = time.time()
 
     try:
+        if is_running_in_docker():
+            audio_name = get_file_name(audio_path)  # 获取音频文件名
+            audio_path = f"{result_input_dir}/{audio_name}"
+
+        logging.info(audio_path)
+
         audios = []
         with open(audio_path, 'rb') as file:
             binary_data = file.read()
@@ -171,6 +179,8 @@ async def turn_audio_path_to_text(
         TextProcessor.log_error(ex)
         logging.error(ex)
     finally:
+        # 删除过期文件
+        delete_old_files_and_folders(result_input_dir, 1)
         clear_cuda_cache()
 
     return {"result": []}
