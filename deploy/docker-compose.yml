@@ -1,0 +1,33 @@
+networks:
+  ai_network:
+    driver: bridge
+
+services:
+  sensevoice:
+    image: sensevoice:1.0
+    container_name: sensevoice
+    restart: always
+    runtime: nvidia
+    privileged: true
+    volumes:
+      - d:/AI/SenseVoice/results:/code/results
+      - d:/AI/SenseVoice/error:/code/error
+      - d:/AI/SenseVoice/logs:/code/logs
+    environment:
+      - TQDM_DISABLE=1 # 全局关闭进度条显示
+      - PYTHONUNBUFFERED=1 # 取消标准输出缓冲
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:1024
+    tty: true  # 分配伪终端
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [ gpu ]
+    shm_size: '32g'
+    ports:
+      - '7868:7868'
+    command: python /code/api.py
+    networks:
+      - ai_network
