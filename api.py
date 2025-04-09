@@ -1,28 +1,28 @@
 # Set the device with environment, default is cuda:0
 # export SENSEVOICE_DEVICE=cuda:1
-import io
-import base64
-import os, re
+import argparse
+import gc
+import os
+import re
+from enum import Enum
+from io import BytesIO
+from typing import List
+
 import torch
 import torchaudio
 import uvicorn
-import argparse
-import gc
-import asyncio
-from fastapi import FastAPI, File, Form, Request, status
-from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, File, Form
 from fastapi.openapi.docs import get_swagger_ui_html
-from starlette.middleware.cors import CORSMiddleware  #引入 CORS中间件模块
-from typing_extensions import Annotated
-from typing import List
-from enum import Enum
-from model import SenseVoiceSmall
+from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
-from io import BytesIO
-from contextlib import asynccontextmanager
-from custom.file_utils import logging
+from starlette.middleware.cors import CORSMiddleware  # 引入 CORS中间件模块
+from typing_extensions import Annotated
+
 from custom.TextProcessor import TextProcessor
+from custom.file_utils import logging
+from model import SenseVoiceSmall
+
 
 class Language(str, Enum):
     auto = "auto"
@@ -33,12 +33,15 @@ class Language(str, Enum):
     ko = "ko"
     nospeech = "nospeech"
 
+
 SENSEVOICE_DEVICE = os.getenv("SENSEVOICE_DEVICE", "cuda:0")
+
 model_dir = "models/SenseVoiceSmall"
 model, kwargs = SenseVoiceSmall.from_pretrained(model=model_dir, device=SENSEVOICE_DEVICE)
 model.eval()
 
 regex = r"<\|.*\|>"
+
 
 # 定义一个函数进行显存清理
 def clear_cuda_cache():
@@ -61,18 +64,22 @@ def clear_cuda_cache():
         logging.info(f"[GPU Memory] Reserved: {torch.cuda.memory_reserved() / (1024 ** 2):.2f} MB")
         logging.info(f"[GPU Memory] Max Reserved: {torch.cuda.max_memory_reserved() / (1024 ** 2):.2f} MB")
 
-#设置允许访问的域名
-origins = ["*"]  #"*"，即为所有。
+
+# 设置允许访问的域名
+origins = ["*"]  # "*"，即为所有。
 
 app = FastAPI(docs_url=None)
+# noinspection PyTypeChecker
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  #设置允许的origins来源
+    allow_origins=origins,  # 设置允许的origins来源
     allow_credentials=True,
     allow_methods=["*"],  # 设置允许跨域的http方法，比如 get、post、put等。
-    allow_headers=["*"])  #允许跨域的headers，可以用来鉴别来源等作用。
+    allow_headers=["*"])  # 允许跨域的headers，可以用来鉴别来源等作用。
 # 挂载静态文件
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
 # 使用本地的 Swagger UI 静态资源
 @app.get("/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
@@ -83,6 +90,7 @@ async def custom_swagger_ui_html():
         swagger_js_url="/static/swagger-ui/5.9.0/swagger-ui-bundle.js",
         swagger_css_url="/static/swagger-ui/5.9.0/swagger-ui.css",
     )
+
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -98,17 +106,20 @@ async def root():
         </body>
     </html>
     """
+
+
 @app.get("/test")
-async  def test():
+async def test():
     return PlainTextResponse('success')
+
 
 @app.get("/api/v1/asr")
 async def turn_audio_path_to_text(
-        audio_path:str,
-        keys:str = "",
-        lang:str = "auto",
-        output_timestamp:bool = False
-    ):
+        audio_path: str,
+        keys: str = "",
+        lang: str = "auto",
+        output_timestamp: bool = False
+):
     logging.info("turn_audio_path_to_text_start")
     try:
         audios = []
@@ -119,28 +130,33 @@ async def turn_audio_path_to_text(
         data_or_path_or_list = data_or_path_or_list.mean(0)
         audios.append(data_or_path_or_list)
         file_io.close()
+
         if lang == "":
             lang = "auto"
         if keys == "":
             key = ["wav_file_tmp_name"]
         else:
             key = keys.split(",")
+
         res = model.inference(
-            data_in = audios,
-            language = lang,  # "zh", "en", "yue", "ja", "ko", "nospeech"
-            use_itn = True,
-            ban_emo_unk = False,
-            key = key,
-            fs = audio_fs,
-            output_timestamp = output_timestamp,
+            data_in=audios,
+            language=lang,  # "zh", "en", "yue", "ja", "ko", "nospeech"
+            use_itn=True,
+            ban_emo_unk=False,
+            key=key,
+            fs=audio_fs,
+            output_timestamp=output_timestamp,
             **kwargs
         )
+
         if len(res) == 0:
             return {"result": []}
+
         for it in res[0]:
             it["raw_text"] = it["text"]
             it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
             it["text"] = rich_transcription_postprocess(it["text"])
+
         return {"result": res[0]}
     except Exception as ex:
         # 记录错误信息
@@ -150,6 +166,7 @@ async def turn_audio_path_to_text(
         clear_cuda_cache()
 
     return {"result": []}
+
 
 @app.post("/api/v1/asr")
 async def turn_audio_to_text(
@@ -157,40 +174,46 @@ async def turn_audio_to_text(
         keys: Annotated[str, Form(description="name of each audio joined with comma")] = "",
         lang: Annotated[Language, Form(description="language of audio content")] = "auto",
         output_timestamp: Annotated[bool, Form(description="output timestamp")] = False
-    ):
+):
     logging.info("turn_audio_to_text_start")
 
     try:
         audios = []
         audio_fs = 0
+
         for file in files:
             file_io = BytesIO(file)
             data_or_path_or_list, audio_fs = torchaudio.load(file_io)
             data_or_path_or_list = data_or_path_or_list.mean(0)
             audios.append(data_or_path_or_list)
             file_io.close()
+
         if lang == "":
             lang = "auto"
         if keys == "":
             key = ["wav_file_tmp_name"]
         else:
             key = keys.split(",")
+
         res = model.inference(
-            data_in = audios,
-            language = lang, # "zh", "en", "yue", "ja", "ko", "nospeech"
-            use_itn = True,
-            ban_emo_unk = False,
-            key = key,
-            fs= audio_fs,
-            output_timestamp = output_timestamp,
+            data_in=audios,
+            language=lang,  # "zh", "en", "yue", "ja", "ko", "nospeech"
+            use_itn=True,
+            ban_emo_unk=False,
+            key=key,
+            fs=audio_fs,
+            output_timestamp=output_timestamp,
             **kwargs
         )
+
         if len(res) == 0:
             return {"result": []}
+
         for it in res[0]:
             it["raw_text"] = it["text"]
             it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
             it["text"] = rich_transcription_postprocess(it["text"])
+
         return {"result": res[0]}
     except Exception as ex:
         # 记录错误信息
@@ -200,6 +223,7 @@ async def turn_audio_to_text(
         clear_cuda_cache()
 
     return {"result": []}
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
