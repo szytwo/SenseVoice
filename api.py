@@ -4,6 +4,7 @@ import argparse
 import gc
 import os
 import re
+import time
 from enum import Enum
 from io import BytesIO
 from typing import List
@@ -121,6 +122,9 @@ async def turn_audio_path_to_text(
         output_timestamp: bool = False
 ):
     logging.info("turn_audio_path_to_text_start")
+    # 记录开始时间
+    start_time = time.time()
+
     try:
         audios = []
         with open(audio_path, 'rb') as file:
@@ -157,6 +161,10 @@ async def turn_audio_path_to_text(
             it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
             it["text"] = rich_transcription_postprocess(it["text"])
 
+        # 计算耗时
+        elapsed = time.time() - start_time
+        logging.info(f"生成完成，用时: {elapsed}")
+
         return {"result": res[0]}
     except Exception as ex:
         # 记录错误信息
@@ -176,6 +184,8 @@ async def turn_audio_to_text(
         output_timestamp: Annotated[bool, Form(description="output timestamp")] = False
 ):
     logging.info("turn_audio_to_text_start")
+    # 记录开始时间
+    start_time = time.time()
 
     try:
         audios = []
@@ -213,6 +223,10 @@ async def turn_audio_to_text(
             it["raw_text"] = it["text"]
             it["clean_text"] = re.sub(regex, "", it["text"], 0, re.MULTILINE)
             it["text"] = rich_transcription_postprocess(it["text"])
+
+        # 计算耗时
+        elapsed = time.time() - start_time
+        logging.info(f"生成完成，用时: {elapsed}")
 
         return {"result": res[0]}
     except Exception as ex:
