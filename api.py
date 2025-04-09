@@ -34,9 +34,9 @@ class Language(str, Enum):
     nospeech = "nospeech"
 
 SENSEVOICE_DEVICE = os.getenv("SENSEVOICE_DEVICE", "cuda:0")
-model_dir = "iic/SenseVoiceSmall"
-m, kwargs = SenseVoiceSmall.from_pretrained(model=model_dir, device=SENSEVOICE_DEVICE)
-m.eval()
+model_dir = "models/SenseVoiceSmall"
+model, kwargs = SenseVoiceSmall.from_pretrained(model=model_dir, device=SENSEVOICE_DEVICE)
+model.eval()
 
 regex = r"<\|.*\|>"
 
@@ -125,7 +125,7 @@ async def turn_audio_path_to_text(
             key = ["wav_file_tmp_name"]
         else:
             key = keys.split(",")
-        res = m.inference(
+        res = model.inference(
             data_in = audios,
             language = lang,  # "zh", "en", "yue", "ja", "ko", "nospeech"
             use_itn = True,
@@ -175,7 +175,7 @@ async def turn_audio_to_text(
             key = ["wav_file_tmp_name"]
         else:
             key = keys.split(",")
-        res = m.inference(
+        res = model.inference(
             data_in = audios,
             language = lang, # "zh", "en", "yue", "ja", "ko", "nospeech"
             use_itn = True,

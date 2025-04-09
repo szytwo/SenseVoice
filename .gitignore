@@ -28,10 +28,15 @@ modelscope_models
 examples/aishell/llm_asr_nar/*
 *.whl
 
-results/
-error/
-venv/
-example/
+/results/
+/results01/
+/error/
+/error01/
+/logs/
+/logs01/
+/venv/
+/example/test/
+/models/
 
 go-api.bat
 go-api-conda.bat
